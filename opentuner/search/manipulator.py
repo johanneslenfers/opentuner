@@ -1737,6 +1737,124 @@ class FloatArray(Array):
         return vs
 
 
+# TODO: test this properly
+# TODO: check if dynamically generated instances of parameters are properly optimized
+class InstanceSequenceParameter(ComplexParameter):
+    """
+    A parameter representing a sequence of instances selected from a fixed alphabet.
+    The alphabet can include strings or other tunable parameters.
+    """
+
+    def __init__(self, name, alphabet, **kwargs):
+        super(InstanceSequenceParameter, self).__init__(name)
+        self.alphabet = alphabet  # Fixed alphabet
+        self.min_length = kwargs.get('min_length', 1)
+        self.max_length = kwargs.get('max_length', 10)
+        self.instances = []  # [(instance_id, parameter), ...]
+        self.next_instance_id = 0
+
+    def sub_parameters(self):
+        """Return the dynamic sub-parameters (instances of tuning parameters)."""
+        return [instance[1] for instance in self.instances]
+
+    def _initialize_instance_storage(self, config):
+        """Ensure that instance storage is initialized."""
+        if f"{self.name}_instances" not in config:
+            config[f"{self.name}_instances"] = {}
+
+    def _create_instance(self, param, config):
+        """
+        Create a new instance of a parameter.
+
+        :param param: The parameter to instantiate
+        :param config: The configuration to update
+        :return: The unique instance ID
+        """
+        self._initialize_instance_storage(config)
+
+        instance_id = self.next_instance_id
+        self.next_instance_id += 1
+
+        instance_name = f"instance/{instance_id}"
+        instance = copy.deepcopy(param)
+        instance.name = f"{self.name}_instances/{instance_name}"
+
+        # Initialize the instance in the configuration
+        config[f"{self.name}_instances"][instance_name] = instance.seed_value()
+
+        self.instances.append((instance_id, instance))
+        return instance_id
+
+    def _resolve_element(self, element, config):
+        """
+        Resolve an element of the alphabet into a concrete value or instance.
+
+        :param element: The alphabet element (string or Parameter)
+        :param config: The configuration to update
+        :return: The value or instance ID
+        """
+        if isinstance(element, Parameter):
+            # Create a new instance of the parameter
+            return self._create_instance(element, config)
+        return element
+
+    def seed_value(self):
+        """Generate a seed value for the sequence parameter."""
+        config = self.parent.config_type()
+        sequence = []
+        for _ in range(self.min_length):
+            element = random.choice(self.alphabet)
+            sequence.append(self._resolve_element(element, config))
+        return sequence
+
+    def set_value(self, config, value):
+        """Set the value of the sequence parameter in the configuration."""
+        config[self.name] = value
+
+    def get_value(self, config):
+        """Get the value of the sequence parameter from the configuration."""
+        sequence = config[self.name]
+        resolved_sequence = []
+        for element in sequence:
+            if isinstance(element, int):  # Instance ID
+                instance_name = f"instance/{element}"
+                resolved_sequence.append(config[f"{self.name}_instances"][instance_name])
+            else:
+                resolved_sequence.append(element)
+        return resolved_sequence
+
+    def op1_randomize(self, config):
+        """Randomize the sequence with the current alphabet."""
+        self.instances = []
+        self.next_instance_id = 0
+        self._initialize_instance_storage(config)
+
+        sequence = [
+            self._resolve_element(random.choice(self.alphabet), config)
+            for _ in range(random.randint(self.min_length, self.max_length))
+        ]
+        self.set_value(config, sequence)
+
+
+    def normalize(self, config):
+        """Ensure consistency between the sequence and sequence_instances."""
+        sequence = self.get_value(config)
+
+        # Ensure instance storage exists
+        instance_storage = config.get(f"{self.name}_instances", {})
+        if not instance_storage:
+            config[f"{self.name}_instances"] = {}
+
+        for element in sequence:
+            if isinstance(element, int):  # Check instance IDs
+                instance_name = f"instance/{element}"
+                if instance_name not in instance_storage:
+                    # Initialize missing instances with a default value
+                    log.warning(f"Initializing missing instance '{instance_name}'")
+                    instance_storage[instance_name] = None
+
+
+
 ##################
 
 class ManipulatorProxy(object):
