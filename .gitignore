@@ -39,6 +39,7 @@ nosetests.xml
 
 #virtualenv
 venv
+.venv
 .ropeproject
 opentuner.log
 .*.swo
@@ -49,3 +50,6 @@ opentuner.db
 smb.nes
 
 MANIFEST
+
+# Macos
+.DS_Store
