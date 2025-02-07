@@ -256,19 +256,19 @@ class LLVMOpentunerTuning(MeasurementInterface):
             self.compile_to_object("optimized_algorithm.bc", "algorithm.o")
             self.compile_c_to_object("host.c", "host.o")
             self.link_objects(["algorithm.o", "host.o"], "benchmark")
-            execution_time = self.run_benchmark("benchmark")
+            execution_time: float = self.run_benchmark("benchmark")
 
-            print(f"pass: {config.values()}")
+            print(f"pass: {config.values()}") # type: ignore
             print(f"runtime: {execution_time}")
             # import sys
             # sys.exit(0)
 
-            return opentuner.resultsdb.models.Result(time=execution_time)
+            return opentuner.resultsdb.models.Result(time=execution_time) # type: ignore
         except subprocess.CalledProcessError as e:
             print(f"Error during compilation or execution: {e.stderr}")
-            return opentuner.resultsdb.models.Result(time=float(2**31 - 1))
+            return opentuner.resultsdb.models.Result(time=float(2**31 - 1)) # type: ignore
 
-    def test_pass(self, compiler_pass)-> bool:
+    def test_pass(self, compiler_pass: str)-> bool:
         try:
             self.compile_program("algorithm.c", "algorithm.ll")
             self.apply_passes([compiler_pass], "algorithm.ll", "optimized_algorithm.bc")
@@ -306,7 +306,7 @@ class LLVMOpentunerTuning(MeasurementInterface):
         """Compile LLVM IR or source file to object code."""
         self.run_command(["clang", "-c", input_file, "-o", output_file]) # type: ignore
 
-    def link_objects(self, objects: str, output: str) -> None:
+    def link_objects(self, objects: list[str], output: str) -> None:
         """Link object files into an executable."""
         self.run_command(["clang", '-mavx2', '-mfma', '-march=native'] + objects + ["-o", output]) # type: ignore
 
