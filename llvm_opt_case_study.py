@@ -6,9 +6,12 @@ import re
 from opentuner.measurement import MeasurementInterface
 from opentuner.search.manipulator import ConfigurationManipulator, EnumParameter
 
-LENGTH: int = 10
+LENGTH: int = 5
 
-def create_namespace():
+# FIX_COMPILER_OPTIONS: list[str] = ['-mavx2', '-mfma', '-march=native']
+FIX_COMPILER_OPTIONS: list[str] = []
+
+def create_namespace() -> SimpleNamespace:
     """Create and return a namespace for custom arguments."""
     return SimpleNamespace(
         bail_threshold=500,
@@ -285,7 +288,7 @@ class LLVMOpentunerTuning(MeasurementInterface):
 
     def compile_program(self, source: str, output: str) -> None:
         """Compile a source file to LLVM IR."""
-        self.run_command(["clang", '-O0', '-mavx2', '-mfma', '-march=native', "-S", "-emit-llvm", source, "-o", output]) # type: ignore
+        self.run_command(["clang", '-O0'] + FIX_COMPILER_OPTIONS + ["-S", "-emit-llvm", source, "-o", output]) # type: ignore
 
 
     def apply_passes(self, passes: list[str], input_ir: str, output_ir: str) -> None:
@@ -308,7 +311,7 @@ class LLVMOpentunerTuning(MeasurementInterface):
 
     def link_objects(self, objects: list[str], output: str) -> None:
         """Link object files into an executable."""
-        self.run_command(["clang", '-mavx2', '-mfma', '-march=native'] + objects + ["-o", output]) # type: ignore
+        self.run_command(["clang"] + FIX_COMPILER_OPTIONS + objects + ["-o", output]) # type: ignore
 
     def run_benchmark(self, executable: str) -> float:
         """Run the benchmark and return execution time."""
