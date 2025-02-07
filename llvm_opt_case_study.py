@@ -26,9 +26,16 @@ def create_namespace():
         results_log=None,
         results_log_details=None,
         seed_configuration=[],
+        # seed_configuration={
+        #     "pass_0": "",
+        #     "pass_1": "",
+        #     "pass_2": "",
+        #     "pass_3": "",
+        #     "pass_4": "",
+        # },
         technique=None,
         stop_after=float("inf"),
-        test_limit=500
+        test_limit=100
     )
 
 class LLVMOpentunerTuning(MeasurementInterface):
@@ -56,8 +63,9 @@ class LLVMOpentunerTuning(MeasurementInterface):
 
                         pass_name= line.split("<")[0].strip()
 
-                        for param in params:
-                            self.test_pass(param)
+                        # this is for checking parameterized configs, right? 
+                        # for param in params:
+                        #     self.test_pass(param)
 
                         passes[pass_name] = params
 
@@ -117,14 +125,27 @@ class LLVMOpentunerTuning(MeasurementInterface):
 
             # remove all passes that start with print
 
+            # TODO make this better 
             keys_to_delete = []
             for key in passes:
                 if "print" in key:
+                    keys_to_delete.append(key)
+                
+                elif "dot" in key:
+                    keys_to_delete.append(key)
+
+                elif "callgraph" in key:
+                    keys_to_delete.append(key)
+
+                elif "cfg" in key:
                     keys_to_delete.append(key)
 
             for key in keys_to_delete:
                 print(f"delete: {key}")
                 del passes[key]
+            
+            # import sys
+            # sys.exit(0)
 
             return passes
         except subprocess.CalledProcessError as e:
@@ -146,31 +167,69 @@ class LLVMOpentunerTuning(MeasurementInterface):
                     else:
                         parameterized_passes.append(f"{pass_name}<{param}>")
             else:
-                parameterized_passes.append(pass_name)
+                if "dot" not in pass_name:
+                    parameterized_passes.append(pass_name)
+                else:
+                    print(f"pass_name: {pass_name}")
 
         # test all and remove 
         # think about invalid parameters 
-        # parameterized_passes = list(filter(lambda c_pass: self.test_pass(c_pass), parameterized_passes))
+        # Check if we filter out too much? 
+        parameterized_passes = list(filter(lambda c_pass: self.test_pass(c_pass), parameterized_passes))
+
+        # add dummy/empty pass
+        parameterized_passes.append("dummy")
 
         return parameterized_passes
 
 
     def manipulator(self):
         """Define the configuration space."""
+
+        # TODO: fix default config. Opentuner seems to mutate the initial config at the beginning. 
+        # seed config 
+        seed_config = {
+            "pass0": "dummy",
+            "pass1": "dummy",
+        }
+
+        # manipulator = ConfigurationManipulator(seed_config=seed_config)
         manipulator = ConfigurationManipulator()
         available_passes = self.get_parameterized_passes()
+
+
+        initial_config = manipulator.seed_config()
+        for elem in initial_config:
+            print(f"{elem}: {initial_config[elem]}")
 
         if not available_passes:
             raise RuntimeError("No LLVM passes found. Ensure LLVM is installed and accessible.")
 
-        for i in range(20):  # Tune up to 10 passes in sequence
+        for i in range(10):  # Tune up to 10 passes in sequence
             manipulator.add_parameter(EnumParameter(f"pass{i}", available_passes))
+
+        # print(manipulator.seed_config())
+        manipulator._seed_config = seed_config
+
         return manipulator
 
     def run(self, desired_result, input, limit):
         """Compile, optimize, and benchmark the program based on the configuration."""
         config = desired_result.configuration.data
-        passes = list(config.values())
+        passes: list[str] = list(config.values())
+
+        print(f"passes: {passes}")
+
+        # filter out empty passes 
+        passes2 = [cpass for cpass in passes if "dummy" not in cpass]
+
+        print(f"filtered: {passes2}")
+
+        # import sys 
+        # if(passes2 < passes):
+        #     sys.exit(0)
+
+        passes = passes2
 
         try:
             self.compile_program("algorithm.c", "algorithm.ll")
@@ -226,7 +285,7 @@ class LLVMOpentunerTuning(MeasurementInterface):
 
     def compile_c_to_object(self, input_file, output_file):
         """Compile LLVM IR or source file to object code."""
-        self.run_command(["clang", "-c", input_file, "-o", output_file])
+        self.run_command(["clang", "-c", input_file, "-O3", "-o", output_file])
 
     def link_objects(self, objects, output):
         """Link object files into an executable."""
@@ -252,6 +311,12 @@ class LLVMOpentunerTuning(MeasurementInterface):
         return float("inf")  # Return a large value on failure
 
 if __name__ == "__main__":
+
+    # remove llvm.db before running a new experiment 
+    # save existing one or store result afterwards 
+    command: list[str] = ['rm', 'llvm.db']
+    subprocess.run(command, text=True, capture_output=True, check=True)
+
     args = create_namespace()
     # LLVMOpentunerTuning.main(args)
     # argparser = opentuner.default_argparser()
