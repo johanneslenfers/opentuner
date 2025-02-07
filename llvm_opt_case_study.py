@@ -1,9 +1,12 @@
 import subprocess
+from subprocess import CompletedProcess
 from types import SimpleNamespace
 import opentuner
 import re
 from opentuner.measurement import MeasurementInterface
 from opentuner.search.manipulator import ConfigurationManipulator, EnumParameter
+
+LENGTH: int = 10
 
 def create_namespace():
     """Create and return a namespace for custom arguments."""
@@ -18,7 +21,7 @@ def create_namespace():
         no_dups=False,
         par="brr",
         parallel_compile=False,
-        parallelism=4,
+        parallelism=12,
         pipelining=0,
         print_params=False,
         print_search_space_size=False,
@@ -26,30 +29,58 @@ def create_namespace():
         results_log=None,
         results_log_details=None,
         seed_configuration=[],
-        # seed_configuration={
-        #     "pass_0": "",
-        #     "pass_1": "",
-        #     "pass_2": "",
-        #     "pass_3": "",
-        #     "pass_4": "",
-        # },
         technique=None,
         stop_after=float("inf"),
         test_limit=100
     )
 
+# TODO: verify that we do not miss on a good path there 
+passes_to_avoid: list[str] = [
+    "dot-callgraph",
+    "print",
+    "print-callgraph",
+    "print-callgraph-sccs",
+    "print-ir-similarity",
+    "print-lcg",
+    "print-lcg-dot",
+    "print-must-be-executed-contexts",
+    "print-profile-summary",
+    "print-stack-safety",
+    "view-callgraph",
+    "callgraph",
+    "dot-cfg",
+    "dot-cfg-only",
+    "dot-dom",
+    "dot-dom-only",
+    "dot-post-dom",
+    "dot-post-dom-only",
+    "flatten-cfg",
+    "print-alias-sets",
+    "print-cfg-sccs",
+    "print-memderefs",
+    "print-mustexecute",
+    "print-predicateinfo",
+    "structurizecfg",
+    "view-cfg",
+    "view-cfg-only",
+    "cfguard",
+    "simplifycfg",
+    "dot-ddg",
+    "loop-simplifycfg",
+]
+
+
 class LLVMOpentunerTuning(MeasurementInterface):
     """Class for tuning LLVM optimization passes using OpenTuner."""
-
-    def get_available_passes(self):
+    def get_available_passes(self) -> dict[str, list[str]]:
     # """Retrieve a list of available LLVM passes and dynamically parse their parameters."""
-        print("get passes")
         try:
             # Execute the opt command to get passes
-            result = subprocess.run(["opt", "--print-passes"], text=True, capture_output=True, check=True)
-            lines = result.stdout.split("\n")
+            result: CompletedProcess[str] = subprocess.run(["opt", "--print-passes"], text=True, capture_output=True, check=True)
+            lines: list[str] = result.stdout.split("\n")
 
-            passes = {}
+            # TODO: clean this up 
+            passes: dict[str, list[str]] = {}
             for line in lines:
                 # process line 
                 # Extract the pass name and any parameters (if present)
@@ -58,10 +89,9 @@ class LLVMOpentunerTuning(MeasurementInterface):
                         pattern = r"<([^>]+)>"
 
                         # Find all matches
-                        params = str(re.findall(pattern, line)[0]).split(";")
-                        # print(f"     params: {params}")
+                        params: list[str] = str(re.findall(pattern, line)[0]).split(";")
 
-                        pass_name= line.split("<")[0].strip()
+                        pass_name: str = line.split("<")[0].strip()
 
                         # this is for checking parameterized configs, right? 
                         # for param in params:
@@ -70,7 +100,7 @@ class LLVMOpentunerTuning(MeasurementInterface):
                         passes[pass_name] = params
 
                     else:
-                        parts = line.split()
+                        parts: list[str] = line.split()
                         pass_name = parts[0]
                         passes[pass_name] = []
 
@@ -123,10 +153,8 @@ class LLVMOpentunerTuning(MeasurementInterface):
             #             passes[pass_name] = []
            
 
-            # remove all passes that start with print
-
             # TODO make this better 
-            keys_to_delete = []
+            keys_to_delete: list[str] = []
             for key in passes:
                 if "print" in key:
                     keys_to_delete.append(key)
@@ -141,22 +169,20 @@ class LLVMOpentunerTuning(MeasurementInterface):
                     keys_to_delete.append(key)
 
             for key in keys_to_delete:
-                print(f"delete: {key}")
+                # print(f"delete: {key}")
                 del passes[key]
             
-            # import sys
-            # sys.exit(0)
-
             return passes
+
         except subprocess.CalledProcessError as e:
             print(f"Error executing 'opt --print-passes': {e.stderr}")
             return {}
 
 
-    def get_parameterized_passes(self):
+    def get_parameterized_passes(self) -> list[str]:
         """Generate a list of parameterized LLVM passes dynamically."""
-        passes_with_params = self.get_available_passes()
-        parameterized_passes = []
+        passes_with_params: dict[str, list[str]] = self.get_available_passes()
+        parameterized_passes: list[str] = []
 
         for pass_name, params in passes_with_params.items():
             if params:
@@ -172,10 +198,10 @@ class LLVMOpentunerTuning(MeasurementInterface):
                 else:
                     print(f"pass_name: {pass_name}")
 
-        # test all and remove 
-        # think about invalid parameters 
+        # test only a single pass is difficult as they interact 
+        # we have to consider the whole sequence 
         # Check if we filter out too much? 
-        parameterized_passes = list(filter(lambda c_pass: self.test_pass(c_pass), parameterized_passes))
+        # parameterized_passes = list(filter(lambda c_pass: self.test_pass(c_pass), parameterized_passes))
 
         # add dummy/empty pass
         parameterized_passes.append("dummy")
@@ -183,7 +209,7 @@ class LLVMOpentunerTuning(MeasurementInterface):
         return parameterized_passes
 
 
-    def manipulator(self):
+    def manipulator(self) -> ConfigurationManipulator:
         """Define the configuration space."""
 
         # TODO: fix default config. Opentuner seems to mutate the initial config at the beginning. 
@@ -195,18 +221,19 @@ class LLVMOpentunerTuning(MeasurementInterface):
 
         # manipulator = ConfigurationManipulator(seed_config=seed_config)
         manipulator = ConfigurationManipulator()
-        available_passes = self.get_parameterized_passes()
+        available_passes: list[str] = self.get_parameterized_passes()
 
-
-        initial_config = manipulator.seed_config()
-        for elem in initial_config:
-            print(f"{elem}: {initial_config[elem]}")
+        # think about 
+        # initial_config = manipulator.seed_config()
+        # for elem in initial_config:
+        #     print(f"{elem}: {initial_config[elem]}")
 
         if not available_passes:
             raise RuntimeError("No LLVM passes found. Ensure LLVM is installed and accessible.")
 
-        for i in range(10):  # Tune up to 10 passes in sequence
-            manipulator.add_parameter(EnumParameter(f"pass{i}", available_passes))
+        # create sequence
+        for i in range(LENGTH):  
+            manipulator.add_parameter(EnumParameter(f"pass{i}", available_passes)) # type: ignore
 
         # print(manipulator.seed_config())
         manipulator._seed_config = seed_config
@@ -218,16 +245,8 @@ class LLVMOpentunerTuning(MeasurementInterface):
         config = desired_result.configuration.data
         passes: list[str] = list(config.values())
 
-        print(f"passes: {passes}")
-
         # filter out empty passes 
-        passes2 = [cpass for cpass in passes if "dummy" not in cpass]
-
-        print(f"filtered: {passes2}")
-
-        # import sys 
-        # if(passes2 < passes):
-        #     sys.exit(0)
+        passes2: list[str] = [cpass for cpass in passes if "dummy" not in cpass]
 
         passes = passes2
 
@@ -257,7 +276,6 @@ class LLVMOpentunerTuning(MeasurementInterface):
             self.compile_c_to_object("host.c", "host.o")
             self.link_objects(["algorithm.o", "host.o"], "benchmark")
 
-
             print("valid")
             return True
         except:
@@ -265,46 +283,47 @@ class LLVMOpentunerTuning(MeasurementInterface):
             return False
 
 
-    def compile_program(self, source, output):
+    def compile_program(self, source: str, output: str) -> None:
         """Compile a source file to LLVM IR."""
-        self.run_command(["clang", "-S", "-emit-llvm", source, "-o", output])
+        self.run_command(["clang", '-O0', '-mavx2', '-mfma', '-march=native', "-S", "-emit-llvm", source, "-o", output]) # type: ignore
 
-    def apply_passes(self, passes, input_ir, output_ir):
+
+    def apply_passes(self, passes: list[str], input_ir: str, output_ir: str) -> None:
         """Apply LLVM passes to the input IR."""
         pass_pipeline = ",".join(passes)
         test = ["opt"] + [f"-passes={pass_pipeline}"] + [input_ir, "-o", output_ir]
         print(" ".join(test))
         if passes:
-            self.run_command(["opt"] + [f"-passes={pass_pipeline}"] + [input_ir, "-o", output_ir])
-        else:
-            self.run_command(["cp", input_ir, output_ir])
+            self.run_command(["opt"] + [f"-passes={pass_pipeline}"] + [input_ir, "-o", output_ir]) # type: ignore
+        else: 
+            self.run_command(["cp", input_ir, output_ir]) # type: ignore
 
-    def compile_to_object(self, input_file, output_file):
+    def compile_to_object(self, input_file: str, output_file: str) -> None:
         """Compile LLVM IR or source file to object code."""
-        self.run_command(["llc", "-filetype=obj", input_file, "-o", output_file])
+        self.run_command(["llc", "-filetype=obj", input_file, "-o", output_file]) # type: ignore
 
-    def compile_c_to_object(self, input_file, output_file):
+    def compile_c_to_object(self, input_file: str, output_file: str) -> None:
         """Compile LLVM IR or source file to object code."""
-        self.run_command(["clang", "-c", input_file, "-O3", "-o", output_file])
+        self.run_command(["clang", "-c", input_file, "-o", output_file]) # type: ignore
 
-    def link_objects(self, objects, output):
+    def link_objects(self, objects: str, output: str) -> None:
         """Link object files into an executable."""
-        self.run_command(["clang"] + objects + ["-o", output])
+        self.run_command(["clang", '-mavx2', '-mfma', '-march=native'] + objects + ["-o", output]) # type: ignore
 
-    def run_benchmark(self, executable):
+    def run_benchmark(self, executable: str) -> float:
         """Run the benchmark and return execution time."""
-        result = self.run_command(["./" + executable])
+        result: CompletedProcess[str] = self.run_command(["./" + executable]) # type: ignore
         return self.parse_execution_time(result.stdout)
 
-    def run_command(self, command):
+    def run_command(self, command: list[str]) -> CompletedProcess[str]:
         """Run a shell command and return the result."""
         return subprocess.run(command, text=True, capture_output=True, check=True)
 
-    def parse_execution_time(self, output):
+    def parse_execution_time(self, output: str) -> float:
         """Parse execution time from program output."""
         try:
             for line in output.split("\n"):
-                if "Time:" in line:
+                if "Median Time:" in line:
                     return float(line.split(":")[1].strip())
         except Exception as e:
             print(f"Error parsing execution time: {e}")
@@ -315,10 +334,10 @@ if __name__ == "__main__":
     # remove llvm.db before running a new experiment 
     # save existing one or store result afterwards 
     command: list[str] = ['rm', 'llvm.db']
-    subprocess.run(command, text=True, capture_output=True, check=True)
+    subprocess.run(command, text=True, capture_output=True, check=False)
 
     args = create_namespace()
     # LLVMOpentunerTuning.main(args)
     # argparser = opentuner.default_argparser()
     # argparser.add_argument(--database=my_tuning_results.db)
-    LLVMOpentunerTuning.main(args)
+    LLVMOpentunerTuning.main(args) # type: ignore

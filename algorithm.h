@@ -1,5 +1,6 @@
-#include <stdio.h>
+#ifndef ALGORITHM_H
+#define ALGORITHM_H
 
-#define N 128  // Fixed size of the matrices
+void matmul(double* A, double* B, double* C, int size);
 
-void matmul(double A[N][N], double B[N][N], double C[N][N]);
+#endif // ALGORITHM_H
